@@ -8,10 +8,6 @@
 
 declare(strict_types=1);
 
-if (session_status() === PHP_SESSION_NONE) {
-    session_start();
-}
-
 define('DB_HOST', getenv('DB_HOST') ?: '127.0.0.1');
 define('DB_PORT', getenv('DB_PORT') ?: '3306');
 define('DB_NAME', getenv('DB_NAME') ?: 'employee_management');
@@ -41,6 +37,60 @@ if ($sslCa !== false && $sslCa !== '') {
     }
 }
 
+final class PdoSessionHandler implements SessionHandlerInterface
+{
+    public function __construct(private PDO $pdo)
+    {
+    }
+
+    public function open(string $path, string $name): bool
+    {
+        return true;
+    }
+
+    public function close(): bool
+    {
+        return true;
+    }
+
+    public function read(string $id): string|false
+    {
+        $stmt = $this->pdo->prepare(
+            'SELECT payload FROM ems_sessions WHERE session_id = ? AND last_activity >= ?'
+        );
+        $stmt->execute([$id, time() - (int) ini_get('session.gc_maxlifetime')]);
+        $payload = $stmt->fetchColumn();
+
+        return $payload === false ? '' : $payload;
+    }
+
+    public function write(string $id, string $data): bool
+    {
+        $stmt = $this->pdo->prepare(
+            'INSERT INTO ems_sessions (session_id, payload, last_activity)
+             VALUES (?, ?, ?)
+             ON DUPLICATE KEY UPDATE payload = VALUES(payload), last_activity = VALUES(last_activity)'
+        );
+
+        return $stmt->execute([$id, $data, time()]);
+    }
+
+    public function destroy(string $id): bool
+    {
+        $stmt = $this->pdo->prepare('DELETE FROM ems_sessions WHERE session_id = ?');
+
+        return $stmt->execute([$id]);
+    }
+
+    public function gc(int $max_lifetime): int|false
+    {
+        $stmt = $this->pdo->prepare('DELETE FROM ems_sessions WHERE last_activity < ?');
+        $stmt->execute([time() - $max_lifetime]);
+
+        return $stmt->rowCount();
+    }
+}
+
 try {
     $pdo = new PDO(
         'mysql:host=' . DB_HOST . ';port=' . DB_PORT . ';dbname=' . DB_NAME . ';charset=utf8mb4',
@@ -51,6 +101,33 @@ try {
 } catch (PDOException $e) {
     http_response_code(500);
     exit('Database connection failed. Verify DB_HOST, DB_PORT, DB_NAME, DB_USER, and DB_PASS in your deployment environment, configure DB_SSL_CA if required by your provider, and make sure the database schema has been imported.');
+}
+
+try {
+    $pdo->exec(
+        'CREATE TABLE IF NOT EXISTS ems_sessions (
+            session_id VARCHAR(128) NOT NULL PRIMARY KEY,
+            payload MEDIUMBLOB NOT NULL,
+            last_activity BIGINT UNSIGNED NOT NULL,
+            KEY idx_ems_sessions_last_activity (last_activity)
+        ) ENGINE=InnoDB'
+    );
+} catch (PDOException $e) {
+    http_response_code(500);
+    exit('Database connected, but login sessions could not be initialized. Verify that the database user can create tables.');
+}
+
+if (session_status() === PHP_SESSION_NONE) {
+    session_set_save_handler(new PdoSessionHandler($pdo), true);
+    session_set_cookie_params([
+        'lifetime' => 0,
+        'path' => '/',
+        'secure' => (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off')
+            || ($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? '') === 'https',
+        'httponly' => true,
+        'samesite' => 'Lax',
+    ]);
+    session_start();
 }
 
 /* ----------------------------------------------------------------
