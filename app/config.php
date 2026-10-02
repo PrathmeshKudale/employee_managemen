@@ -2,7 +2,8 @@
 /**
  * config.php — Database connection (PDO), session bootstrap, shared helpers.
  * Defaults match a fresh XAMPP install (root / no password). Override with
- * environment variables DB_HOST, DB_NAME, DB_USER, DB_PASS when deploying.
+ * DB_HOST, DB_PORT, DB_NAME, DB_USER, and DB_PASS when deploying. Set
+ * DB_SSL_CA to a CA certificate path when the database requires TLS.
  */
 
 declare(strict_types=1);
@@ -12,24 +13,44 @@ if (session_status() === PHP_SESSION_NONE) {
 }
 
 define('DB_HOST', getenv('DB_HOST') ?: '127.0.0.1');
+define('DB_PORT', getenv('DB_PORT') ?: '3306');
 define('DB_NAME', getenv('DB_NAME') ?: 'employee_management');
 define('DB_USER', getenv('DB_USER') ?: 'root');
 define('DB_PASS', getenv('DB_PASS') !== false ? getenv('DB_PASS') : '');
 
+$pdoOptions = [
+    PDO::ATTR_ERRMODE            => PDO::ERRMODE_EXCEPTION,
+    PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
+    PDO::ATTR_EMULATE_PREPARES   => false,
+];
+
+$sslCa = getenv('DB_SSL_CA');
+if ($sslCa !== false && $sslCa !== '') {
+    $sslCaPath = str_starts_with($sslCa, DIRECTORY_SEPARATOR)
+        ? $sslCa
+        : __DIR__ . DIRECTORY_SEPARATOR . $sslCa;
+
+    if (!is_file($sslCaPath) || !defined('PDO::MYSQL_ATTR_SSL_CA')) {
+        http_response_code(500);
+        exit('Database TLS is configured, but its CA file is missing or PDO MySQL TLS support is unavailable.');
+    }
+
+    $pdoOptions[PDO::MYSQL_ATTR_SSL_CA] = $sslCaPath;
+    if (defined('PDO::MYSQL_ATTR_SSL_VERIFY_SERVER_CERT')) {
+        $pdoOptions[PDO::MYSQL_ATTR_SSL_VERIFY_SERVER_CERT] = true;
+    }
+}
+
 try {
     $pdo = new PDO(
-        'mysql:host=' . DB_HOST . ';dbname=' . DB_NAME . ';charset=utf8mb4',
+        'mysql:host=' . DB_HOST . ';port=' . DB_PORT . ';dbname=' . DB_NAME . ';charset=utf8mb4',
         DB_USER,
         DB_PASS,
-        [
-            PDO::ATTR_ERRMODE            => PDO::ERRMODE_EXCEPTION,
-            PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
-            PDO::ATTR_EMULATE_PREPARES   => false,
-        ]
+        $pdoOptions
     );
 } catch (PDOException $e) {
     http_response_code(500);
-    exit('Database connection failed. Verify DB_HOST, DB_NAME, DB_USER, and DB_PASS in your deployment environment, and make sure the database schema has been imported.');
+    exit('Database connection failed. Verify DB_HOST, DB_PORT, DB_NAME, DB_USER, and DB_PASS in your deployment environment, configure DB_SSL_CA if required by your provider, and make sure the database schema has been imported.');
 }
 
 /* ----------------------------------------------------------------
