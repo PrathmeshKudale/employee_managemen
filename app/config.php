@@ -30,14 +30,14 @@ if ($sslCa !== false && $sslCa !== '') {
         ? $sslCa
         : __DIR__ . DIRECTORY_SEPARATOR . $sslCa;
 
-    if (!is_file($sslCaPath) || !defined('PDO::MYSQL_ATTR_SSL_CA')) {
+    if (!is_file($sslCaPath) || !class_exists(PDO::class . '\\Mysql')) {
         http_response_code(500);
         exit('Database TLS is configured, but its CA file is missing or PDO MySQL TLS support is unavailable.');
     }
 
-    $pdoOptions[PDO::MYSQL_ATTR_SSL_CA] = $sslCaPath;
-    if (defined('PDO::MYSQL_ATTR_SSL_VERIFY_SERVER_CERT')) {
-        $pdoOptions[PDO::MYSQL_ATTR_SSL_VERIFY_SERVER_CERT] = true;
+    $pdoOptions[\Pdo\Mysql::ATTR_SSL_CA] = $sslCaPath;
+    if (defined('Pdo\\Mysql::ATTR_SSL_VERIFY_SERVER_CERT')) {
+        $pdoOptions[\Pdo\Mysql::ATTR_SSL_VERIFY_SERVER_CERT] = true;
     }
 }
 
