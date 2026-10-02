@@ -29,7 +29,7 @@ try {
     );
 } catch (PDOException $e) {
     http_response_code(500);
-    exit('Database connection failed. Please verify config.php credentials and that the database has been imported.');
+    exit('Database connection failed. Verify DB_HOST, DB_NAME, DB_USER, and DB_PASS in your deployment environment, and make sure the database schema has been imported.');
 }
 
 /* ----------------------------------------------------------------
